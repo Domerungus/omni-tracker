@@ -8,19 +8,18 @@ async function scrapeSalidzini(page, component, dynamicFloor) {
   const searchUrl = `${SALIDZINI_SEARCH}?q=${encodeURIComponent(query)}`;
 
   try {
-    // Устанавливаем латвийские заголовки для имитации локального пользователя
     await page.setExtraHTTPHeaders({
       'Accept-Language': 'lv-LV,lv;q=0.9,en-US;q=0.8,en;q=0.7',
-      'Cache-Control': 'no-cache',
-      'Pragma': 'no-cache',
+      'Referer': 'https://www.google.com/',
     });
 
-    await page.goto(searchUrl, {
+    const response = await page.goto(searchUrl, {
       waitUntil: 'load',
       timeout: NAVIGATION_TIMEOUT_MS,
     });
 
-    // Даем сайту время "прийти в себя" после загрузки
+    console.log(`    ℹ️  Salidzini.lv: HTTP ${response?.status() || 'unknown'}`);
+
     await new Promise(r => setTimeout(r, 5000));
 
     await page.waitForSelector('.item_box_main', {
@@ -28,17 +27,13 @@ async function scrapeSalidzini(page, component, dynamicFloor) {
     });
   } catch (err) {
     const pageTitle = await page.title();
-    const content = await page.evaluate(() => document.body.innerText.substring(0, 300));
+    const content = await page.evaluate(() => document.body?.innerText?.substring(0, 300) || 'EMPTY BODY');
     const url = page.url();
     
     console.log(`    ⚠️  Salidzini.lv: Failed to load results.`);
     console.log(`       URL: ${url}`);
     console.log(`       Title: "${pageTitle}"`);
     console.log(`       Snippet: ${content.replace(/\n/g, ' ')}`);
-    
-    if (content.toLowerCase().includes('robot') || content.toLowerCase().includes('human') || content.toLowerCase().includes('verify')) {
-      console.log('       🛑 Причина: Обнаружена защита от ботов (Captcha).');
-    }
     return [];
   }
 

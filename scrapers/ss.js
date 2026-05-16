@@ -1,7 +1,7 @@
 const { NAVIGATION_TIMEOUT_MS, RESULTS_TIMEOUT_MS } = require('./config');
 const { hasNegativeKeyword, hasPositiveKeyword, parseEuroPrice, isUsedCondition } = require('./helpers');
 
-const SS_SEARCH_RESULT = 'https://www.ss.com/ru/search-result/';
+const SS_SEARCH_RESULT = 'https://www.ss.com/lv/search-result/';
 
 function isNewCondition(value) {
   const normalized = (value || '').trim().toLowerCase();
@@ -25,18 +25,38 @@ async function readConditionFromDetail(page) {
 
 async function scrapeSS(page, component, dynamicFloor) {
   const query = component.search_keywords_salidzini;
-
   const searchUrl = `${SS_SEARCH_RESULT}?q=${encodeURIComponent(query)}`;
 
-  await page.goto(searchUrl, {
-    waitUntil: 'domcontentloaded',
-    timeout: NAVIGATION_TIMEOUT_MS,
-  });
-
   try {
-    await page.waitForSelector('tr[id^="tr_"]', { timeout: 3000 });
-  } catch {
-    console.log('SS.com: Нет объявлений');
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': 'lv-LV,lv;q=0.9,en-US;q=0.8,en;q=0.7',
+    });
+
+    await page.goto(searchUrl, {
+      waitUntil: 'load',
+      timeout: NAVIGATION_TIMEOUT_MS,
+    });
+
+    // Если попали на страницу выбора категорий (Meklēšanas rezultāti), кликаем на первую категорию
+    const isCategoryPage = await page.evaluate(() => {
+      const h1 = document.querySelector('h1')?.innerText || '';
+      return h1.includes('Meklēšanas rezultāti') || h1.includes('Результаты поиска');
+    });
+
+    if (isCategoryPage) {
+      const firstCategory = await page.$('a.a_category');
+      if (firstCategory) {
+        await Promise.all([
+          page.waitForNavigation({ waitUntil: 'load' }),
+          firstCategory.click(),
+        ]);
+      }
+    }
+
+    await page.waitForSelector('tr[id^="tr_"]', { timeout: 10000 });
+  } catch (err) {
+    const title = await page.title();
+    console.log(`SS.com: Нет объявлений (Title: "${title}")`);
     return [];
   }
 
