@@ -147,6 +147,12 @@ async function runTracker() {
   try {
     console.log('🚀 Omni-Tracker — мульти-источник (Salidzini + SS + Amazon)\n');
 
+    const hasComponents = await db.schema.hasTable('components');
+    if (!hasComponents) {
+      console.log('⚠️ База данных не найдена. Автоматически создаем таблицы...');
+      require('child_process').execSync('node db-setup.js', { stdio: 'inherit' });
+    }
+
     const components = await db('components')
       .select(
         'id',
@@ -160,7 +166,7 @@ async function runTracker() {
       .orderBy('id');
 
     if (components.length === 0) {
-      console.error('❌ В таблице components нет записей. Сначала выполните: npm run db:setup');
+      console.error('❌ В таблице components нет записей. Авто-инициализация не сработала.');
       process.exit(1);
     }
 
