@@ -8,22 +8,27 @@ async function scrapeSalidzini(page, component, dynamicFloor) {
   const searchUrl = `${SALIDZINI_SEARCH}?q=${encodeURIComponent(query)}`;
 
   try {
-    await page.setUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 14_7_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Mobile/15E148 Safari/604.1');
-    
     await page.setExtraHTTPHeaders({
       'Accept-Language': 'lv-LV,lv;q=0.9',
       'Referer': 'https://www.google.com/',
     });
 
-    const response = await page.goto(searchUrl, {
+    let response = await page.goto(searchUrl, {
       waitUntil: 'load',
       timeout: NAVIGATION_TIMEOUT_MS,
     });
 
+    // Если получили пустую страницу, пробуем обновить один раз
+    const isEmpty = await page.evaluate(() => !document.body || document.body.innerText.trim().length < 10);
+    if (isEmpty) {
+      console.log('    ⏳ Salidzini.lv: Пустая страница, пробую обновить...');
+      await new Promise(r => setTimeout(r, 3000));
+      response = await page.reload({ waitUntil: 'load' });
+    }
+
     console.log(`    ℹ️  Salidzini.lv: HTTP ${response?.status() || 'unknown'}`);
 
-    // Долгое ожидание для рендеринга JS
-    await new Promise(r => setTimeout(r, 10000));
+    await new Promise(r => setTimeout(r, 3000));
 
     await page.waitForSelector('.item_box_main', {
       timeout: RESULTS_TIMEOUT_MS,

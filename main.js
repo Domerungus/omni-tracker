@@ -1,37 +1,23 @@
+require('dotenv').config();
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-const knex = require('knex');
 const cron = require('node-cron');
-const express = require('express');
+const knex = require('knex');
+const { sendTelegramAlert } = require('./telegram');
+const { printBuildSummary } = require('./lib/summary');
 
+// Подключаем парсеры
 const { scrapeSalidzini } = require('./scrapers/salidzini');
 const { scrapeSS } = require('./scrapers/ss');
 const { scrapeAmazon } = require('./scrapers/amazon');
-const { NAVIGATION_TIMEOUT_MS, RESULTS_TIMEOUT_MS } = require('./scrapers/config');
-const { BLACKLISTED_SHOPS, applyOfferFilters } = require('./lib/filters');
-const { printBuildSummary } = require('./lib/summary');
-const { sendTelegramAlert } = require('./telegram');
 
 puppeteer.use(StealthPlugin());
 
-const PAUSE_MIN_MS = 3000;
-const PAUSE_MAX_MS = 7000;
-const DYNAMIC_FLOOR_RATIO = 0.45;
-
-const BROWSER_ARGS = [
-  '--start-maximized',
-  '--disable-blink-features=AutomationControlled',
-  '--disable-infobars',
-  '--no-first-run',
-  '--no-default-browser-check',
-  '--disable-dev-shm-usage',
-  '--disable-gpu',
-  '--no-zygote',
-  '--js-flags=--max-old-space-size=256',
-  '--lang=lv-LV,lv',
-  '--no-sandbox',
-  '--disable-setuid-sandbox',
-];
+// --- КОНФИГУРАЦИЯ ---
+const BROWSER_ARGS = ['--start-maximized', '--lang=lv-LV,lv'];
+const NAVIGATION_TIMEOUT_MS = 60000;
+const RESULTS_TIMEOUT_MS = 30000;
+const DYNAMIC_FLOOR_RATIO = 0.45; // Игнорим всё, что дешевле 45% от цели (обычно это мусор)
 
 const db = knex({
   client: 'better-sqlite3',
@@ -39,235 +25,159 @@ const db = knex({
   useNullAsDefault: true,
 });
 
-function randomPauseMs() {
-  return PAUSE_MIN_MS + Math.random() * (PAUSE_MAX_MS - PAUSE_MIN_MS);
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function logComponentHeader(component, index, total, dynamicFloor) {
-  const line = '═'.repeat(52);
-  console.log(`\n${line}`);
+/**
+ * Логика обработки одного компонента
+ */
+async function processComponent(page, component, index, total) {
+  console.log('════════════════════════════════════════════════════');
   console.log(`🔧 [${index + 1}/${total}] ${component.name}`);
   console.log(`   🎯 Целевая цена: ${component.target_price} €`);
-  console.log(`   📉 Динамический порог (45%): ${dynamicFloor.toFixed(2)} €`);
-  console.log(`   🔎 Salidzini / SS: «${component.search_keywords_salidzini}»`);
-  console.log(`   🔎 Amazon: «${component.search_keywords_amazon || '—'}»`);
-  console.log(line);
-}
+  
+  const dynamicFloor = component.target_price ? component.target_price * DYNAMIC_FLOOR_RATIO : null;
+  if (dynamicFloor) console.log(`   📉 Динамический порог (45%): ${dynamicFloor.toFixed(2)} €`);
+  
+  console.log('════════════════════════════════════════════════════');
 
-async function saveBestPrice(component, offer) {
-  // Find historical minimum before saving the new price
-  const minResult = await db('price_logs')
-    .min('price as historical_min')
-    .where('component_id', component.id)
-    .first();
-  const historicalMin = minResult?.historical_min;
+  const allOffers = [];
 
-  await db('price_logs').insert({
-    component_id: component.id,
-    price: offer.price,
-    shop_name: `${offer.source}: ${offer.shop_name}`,
-    url: offer.url,
-    scraped_at: db.fn.now(),
-  });
-
-  const delta = Number(component.target_price) - offer.price;
-  const status = delta >= 0 ? '✅ ниже цели' : '⚠️  выше цели';
-
-  console.log(
-    `   💾 Лучшая цена: ${offer.price} € @ ${offer.source} / ${offer.shop_name} (${status}, цель ${component.target_price} €)`,
-  );
-
-  // Check for price drop and send alert
-  if (historicalMin !== null && historicalMin !== undefined) {
-    if (offer.price < historicalMin && (historicalMin - offer.price) > 1) {
-      const msg = `🚨 Падение цены!\n📦 <b>${component.name}</b>\n📉 Новая цена: <b>${offer.price}</b> € (Было: ${historicalMin} €)\n🏪 Магазин: ${offer.shop_name}\n🔗 <a href="${offer.url}">Ссылка</a>`;
-      await sendTelegramAlert(msg);
-    }
-  }
-}
-
-async function runScraper(name, scraperFn, page, component, dynamicFloor) {
+  // 1. Salidzini
+  console.log('   🌐 Salidzini.lv...');
   try {
-    console.log(`   🌐 ${name}...`);
-    const offers = await scraperFn(page, component, dynamicFloor);
-    console.log(`   ✅ ${name}: найдено ${offers.length} (топ-3 до общей фильтрации)`);
-    return offers;
+    const sResults = await scrapeSalidzini(page, component, dynamicFloor);
+    allOffers.push(...sResults);
+    console.log(`   ✅ Salidzini.lv: найдено ${sResults.length}`);
   } catch (err) {
-    console.error(`   ⚠️  ${name}: ${err.message}`);
-    return [];
+    console.log(`   ⚠️  Salidzini.lv ошибка: ${err.message}`);
   }
-}
 
-async function processComponent(page, component, index, total) {
-  const dynamicFloor = Number(component.target_price) * DYNAMIC_FLOOR_RATIO;
-  logComponentHeader(component, index, total, dynamicFloor);
+  // 2. SS.com
+  console.log('   🌐 SS.com...');
+  try {
+    const ssResults = await scrapeSS(page, component, dynamicFloor);
+    allOffers.push(...ssResults);
+    console.log(`   ✅ SS.com: найдено ${ssResults.length}`);
+  } catch (err) {
+    console.log(`   ⚠️  SS.com ошибка: ${err.message}`);
+  }
 
-  const salidziniOffers = await runScraper('Salidzini.lv', scrapeSalidzini, page, component, dynamicFloor);
-  const ssOffers = await runScraper('SS.com', scrapeSS, page, component, dynamicFloor);
-  const amazonOffers = await runScraper('Amazon.de', scrapeAmazon, page, component, dynamicFloor);
+  // 3. Amazon
+  console.log('   🌐 Amazon.de...');
+  try {
+    const amzResults = await scrapeAmazon(page, component, dynamicFloor);
+    allOffers.push(...amzResults);
+    console.log(`   ✅ Amazon.de: найдено ${amzResults.length}`);
+  } catch (err) {
+    console.log(`   ⚠️  Amazon.de ошибка: ${err.message}`);
+  }
 
-  const merged = [...salidziniOffers, ...ssOffers, ...amazonOffers];
-  console.log(`   📦 Всего предложений от парсеров: ${merged.length}`);
-
-  const { filtered, rejectedShops, rejectedFloor } = applyOfferFilters(merged, dynamicFloor);
-
-  console.log(
-    `   🚫 Магазины: -${rejectedShops} | 📉 Ниже порога ${dynamicFloor.toFixed(2)} €: -${rejectedFloor}`,
-  );
-  console.log(`   🚫 Чёрный список: ${BLACKLISTED_SHOPS.join(', ')}`);
-
-  if (filtered.length === 0) {
-    console.log('   ⚠️  После фильтрации ничего не осталось — пропуск записи в price_logs');
+  if (allOffers.length === 0) {
+    console.log('\n   ❌ Ничего не найдено (или всё отфильтровано).');
     return null;
   }
 
-  const sorted = [...filtered].sort((a, b) => a.price - b.price);
+  // Сортировка по цене
+  const sorted = allOffers.sort((a, b) => a.price - b.price);
   const best = sorted[0];
-  const top3 = sorted.slice(0, 3);
 
-  console.log(`\n   🏆 Топ-${top3.length} (все источники, после фильтров):\n`);
-  console.table(
-    top3.map((offer, i) => ({
-      '#': i + 1,
-      Источник: offer.source,
-      Магазин: offer.shop_name,
-      'Цена (€)': offer.price,
-      Ссылка: offer.url,
-    })),
-  );
+  console.log(`\n   💾 Лучшая цена: ${best.price} € @ ${best.shop_name} (${best.source})`);
+  
+  // Сохранение в базу
+  await db('price_logs').insert({
+    component_id: component.id,
+    price: best.price,
+    shop_name: best.shop_name,
+    url: best.url,
+  });
 
-  await saveBestPrice(component, best);
-  return best.price;
+  return best;
 }
 
+/**
+ * Главная функция запуска
+ */
 async function runTracker() {
   let browser;
-
   try {
-    console.log('🚀 Omni-Tracker — мульти-источник (Salidzini + SS + Amazon)\n');
-
-    const hasComponents = await db.schema.hasTable('components');
-    if (!hasComponents) {
-      console.log('⚠️ База данных не найдена. Автоматически создаем таблицы...');
-      require('child_process').execSync('node db-setup.js', { stdio: 'inherit' });
-    }
-
-    const components = await db('components')
-      .select(
-        'id',
-        'name',
-        'target_price',
-        'search_keywords_salidzini',
-        'search_keywords_amazon',
-        'positive_keywords',
-        'negative_keywords'
-      )
-      .orderBy('id');
-
+    console.log('\n🚀 Omni-Tracker — Запуск сессии поиска цен...');
+    
+    const components = await db('components').select('*').orderBy('id');
     if (components.length === 0) {
-      console.error('❌ В таблице components нет записей. Авто-инициализация не сработала.');
-      process.exit(1);
+      console.error('❌ Ошибка: Таблица components пуста. Запустите npm run db:setup');
+      return;
     }
 
-    console.log(`✅ Загружено компонентов: ${components.length}\n`);
-
-    console.log('🥷 Запуск браузера (Stealth mode)...');
     browser = await puppeteer.launch({
-      headless: true,
+      headless: true, // Фоновый режим
       args: BROWSER_ARGS,
-      ignoreDefaultArgs: ['--enable-automation'],
-      defaultViewport: null,
+      defaultViewport: null
+    });
+
+    // Устанавливаем глобальный User-Agent (Desktop), чтобы Amazon не думал, что мы с iPhone
+    const context = browser.defaultBrowserContext();
+    await context.overridePermissions('https://www.amazon.de', ['notifications']);
+    
+    // Применяем UA ко всем новым страницам
+    browser.on('targetcreated', async (target) => {
+      const page = await target.page();
+      if (page) {
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+      }
     });
 
     const sessionResults = [];
-    let index = 0;
 
-    for (const component of components) {
-      if (!component.search_keywords_salidzini) {
-        console.log(`\n⚠️  Пропуск «${component.name}»: не задан search_keywords_salidzini`);
-        index += 1;
-        continue;
-      }
+    for (let i = 0; i < components.length; i++) {
+      const page = await browser.newPage();
+      page.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
+      page.setDefaultTimeout(RESULTS_TIMEOUT_MS);
 
       try {
-        const width = 1920 + Math.floor(Math.random() * 100);
-        const height = 1080 + Math.floor(Math.random() * 100);
-        
-        page = await browser.newPage();
-        await page.setViewport({ width, height });
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
-        
-        page.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
-        page.setDefaultTimeout(RESULTS_TIMEOUT_MS);
-
-        const bestPrice = await processComponent(page, component, index, components.length);
-
-        if (bestPrice != null) {
+        const bestOffer = await processComponent(page, components[i], i, components.length);
+        if (bestOffer) {
           sessionResults.push({
-            name: component.name,
-            target: Number(component.target_price),
-            current: bestPrice,
+            name: components[i].name,
+            target: components[i].target_price,
+            current: bestOffer.price,
+            url: bestOffer.url,
+            shop_name: bestOffer.shop_name
           });
         }
       } catch (err) {
-        console.error(`   ❌ Ошибка «${component.name}»: ${err.message}`);
+        console.error(`   ❌ Критическая ошибка при обработке ${components[i].name}:`, err.message);
       } finally {
-        if (page) await page.close();
+        await page.close();
       }
 
-      const pauseMs = Math.round(randomPauseMs());
-      console.log(`   ⏳ Пауза ${(pauseMs / 1000).toFixed(1)} сек...`);
-      await sleep(pauseMs);
-      index += 1;
+      // Пауза между компонентами
+      if (i < components.length - 1) {
+        const pause = 5000 + Math.random() * 3000;
+        console.log(`   ⏳ Ожидание ${Math.round(pause/1000)} сек...`);
+        await new Promise(r => setTimeout(r, pause));
+      }
     }
 
-    await browser.close();
-    browser = null;
-    console.log('\n👋 Браузер закрыт. Все компоненты обработаны.');
-
-    const tgSummary = printBuildSummary(sessionResults);
-    if (tgSummary) {
-      await sendTelegramAlert(tgSummary);
+    console.log('\n🏁 Сессия завершена. Формируем отчет...');
+    const summaryHtml = printBuildSummary(sessionResults);
+    if (summaryHtml) {
+      await sendTelegramAlert(summaryHtml);
+      console.log('✅ Отчет отправлен в Telegram.');
     }
+
+  } catch (err) {
+    console.error('❌ Ошибка в runTracker:', err);
   } finally {
-    if (browser) {
-      await browser.close();
-    }
-    console.log('✅ Итерация runTracker завершена. Ожидание следующего запуска...');
+    if (browser) await browser.close();
+    console.log('\n💤 Спим до следующего запуска...');
   }
 }
 
-// ---------------------------------------------------------
-// WEB SERVER (KEEP-ALIVE FOR RENDER/CLOUD)
-// ---------------------------------------------------------
-const app = express();
-const port = process.env.PORT || 3000;
+// --- ЗАПУСК ПО РАСПИСАНИЮ ---
+console.log('🕒 Бот активен. Расписание: каждые 6 часов.');
 
-app.get('/', (req, res) => {
-  res.send('Omni-Tracker is alive');
+cron.schedule('0 */6 * * *', () => {
+  console.log('\n⏰ [CRON] Время проверять цены!');
+  runTracker();
 });
 
-app.listen(port, () => {
-  console.log(`🌐 Веб-сервер Keep-Alive запущен на порту ${port}`);
-});
-
-// ---------------------------------------------------------
-// CRON SCHEDULER
-// ---------------------------------------------------------
-console.log('🕒 Настройка расписания CRON (каждые 6 часов)...');
-cron.schedule('0 */6 * * *', async () => {
-  console.log('\n=======================================');
-  console.log('⏰ Запуск по расписанию CRON');
-  console.log('=======================================');
-  await runTracker().catch(err => console.error('❌ Ошибка CRON runTracker:', err));
-});
-
-// ---------------------------------------------------------
-// STARTUP
-// ---------------------------------------------------------
-console.log('⚡ Мгновенный запуск при старте...');
-runTracker().catch(err => console.error('❌ Ошибка стартового runTracker:', err));
+// Первый запуск при старте приложения
+runTracker();

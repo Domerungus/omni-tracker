@@ -37,6 +37,24 @@ async function scrapeSS(page, component, dynamicFloor) {
       timeout: NAVIGATION_TIMEOUT_MS,
     });
 
+    // Проверяем, не перекинуло ли нас сразу в объявление
+    const isDirectAd = await page.evaluate(() => !!document.querySelector('#msg_div_msg'));
+    if (isDirectAd) {
+      console.log('    ℹ️  SS.com: Прямое попадание в объявление');
+      const directAdData = await page.evaluate(() => {
+        const title = document.querySelector('h1')?.innerText || '';
+        const priceText = document.querySelector('.ads_price')?.innerText || '';
+        return [{
+          link: window.location.href,
+          priceText,
+          title,
+          conditionFromRow: null,
+          isDirect: true
+        }];
+      });
+      return await processSSRows(page, directAdData, component);
+    }
+
     // Если попали на страницу выбора категорий (Meklēšanas rezultāti), кликаем на первую категорию
     const isCategoryPage = await page.evaluate(() => {
       const h1 = document.querySelector('h1')?.innerText || '';
@@ -88,6 +106,10 @@ async function scrapeSS(page, component, dynamicFloor) {
     });
   });
 
+  return await processSSRows(page, rows, component);
+}
+
+async function processSSRows(page, rows, component) {
   const sortedRows = rows
     .map(row => ({ ...row, price: parseEuroPrice(row.priceText) }))
     .filter(row => row.price != null && row.link)
@@ -97,10 +119,13 @@ async function scrapeSS(page, component, dynamicFloor) {
 
   for (const row of sortedRows) {
     try {
-      await page.goto(row.link, {
-        waitUntil: 'domcontentloaded',
-        timeout: NAVIGATION_TIMEOUT_MS,
-      });
+      // Если это прямое объявление, мы уже на нем
+      if (!row.isDirect) {
+        await page.goto(row.link, {
+          waitUntil: 'domcontentloaded',
+          timeout: NAVIGATION_TIMEOUT_MS,
+        });
+      }
 
       // Wait for ad content to load
       await new Promise((r) => setTimeout(r, 2000));
