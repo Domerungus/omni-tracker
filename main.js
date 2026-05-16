@@ -25,6 +25,9 @@ const BROWSER_ARGS = [
   '--no-first-run',
   '--no-default-browser-check',
   '--disable-dev-shm-usage',
+  '--disable-gpu',
+  '--no-zygote',
+  '--js-flags=--max-old-space-size=256',
   '--lang=lv-LV,lv',
   '--no-sandbox',
   '--disable-setuid-sandbox',
@@ -180,10 +183,6 @@ async function runTracker() {
       defaultViewport: null,
     });
 
-    const page = await browser.newPage();
-    page.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
-    page.setDefaultTimeout(RESULTS_TIMEOUT_MS);
-
     const sessionResults = [];
     let index = 0;
 
@@ -194,7 +193,23 @@ async function runTracker() {
         continue;
       }
 
+      let page;
       try {
+        page = await browser.newPage();
+        page.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
+        page.setDefaultTimeout(RESULTS_TIMEOUT_MS);
+
+        // Оптимизация памяти (важно для 512MB RAM): блокируем картинки и стили
+        await page.setRequestInterception(true);
+        page.on('request', (req) => {
+          const type = req.resourceType();
+          if (type === 'image' || type === 'stylesheet' || type === 'font' || type === 'media') {
+            req.abort();
+          } else {
+            req.continue();
+          }
+        });
+
         const bestPrice = await processComponent(page, component, index, components.length);
 
         if (bestPrice != null) {
@@ -206,6 +221,8 @@ async function runTracker() {
         }
       } catch (err) {
         console.error(`   ❌ Ошибка «${component.name}»: ${err.message}`);
+      } finally {
+        if (page) await page.close();
       }
 
       const pauseMs = Math.round(randomPauseMs());
