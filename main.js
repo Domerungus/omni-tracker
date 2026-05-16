@@ -31,7 +31,7 @@ const BROWSER_ARGS = [
 ];
 
 const db = knex({
-  client: 'sqlite3',
+  client: 'better-sqlite3',
   connection: { filename: './tracker.db' },
   useNullAsDefault: true,
 });
