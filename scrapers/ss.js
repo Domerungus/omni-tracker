@@ -107,16 +107,19 @@ async function scrapeSS(page, component, dynamicFloor) {
 
       const pageData = await page.evaluate(() => {
         const msg = document.querySelector('#msg_div_msg')?.innerText || '';
-        const bodyText = document.body.innerText || '';
-        return { msg, bodyText };
+        return { msg };
       });
       
-      const hasPos = hasPositiveKeyword(pageData.bodyText, component.positive_keywords);
+      const hasPos = hasPositiveKeyword(pageData.msg, component.positive_keywords);
       const hasNeg = hasNegativeKeyword(row.title + ' ' + pageData.msg, component.negative_keywords);
-      const isUsed = isUsedCondition(pageData.bodyText);
+      const isUsed = isUsedCondition(pageData.msg);
 
       if (!hasPos || hasNeg || isUsed) {
-        console.log(`      [Skip] ss.com: Failed keyword/condition check.`);
+        if (hasNeg) {
+          console.log(`      [Skip] ss.com: Match Neg keyword in Title/Desc.`);
+        } else {
+          console.log(`      [Skip] ss.com: Failed keyword/condition check.`);
+        }
         continue;
       }
 
