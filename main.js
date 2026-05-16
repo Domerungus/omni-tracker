@@ -193,10 +193,12 @@ async function runTracker() {
         continue;
       }
 
-      let page;
       try {
+        const width = 1920 + Math.floor(Math.random() * 100);
+        const height = 1080 + Math.floor(Math.random() * 100);
+        
         page = await browser.newPage();
-        await page.setViewport({ width: 1920, height: 1080 });
+        await page.setViewport({ width, height });
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
         
         page.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);

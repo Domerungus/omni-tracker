@@ -8,22 +8,36 @@ async function scrapeSalidzini(page, component, dynamicFloor) {
   const searchUrl = `${SALIDZINI_SEARCH}?q=${encodeURIComponent(query)}`;
 
   try {
+    // Устанавливаем латвийские заголовки для имитации локального пользователя
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': 'lv-LV,lv;q=0.9,en-US;q=0.8,en;q=0.7',
+      'Cache-Control': 'no-cache',
+      'Pragma': 'no-cache',
+    });
+
     await page.goto(searchUrl, {
-      waitUntil: 'networkidle2',
+      waitUntil: 'load',
       timeout: NAVIGATION_TIMEOUT_MS,
     });
 
-    await page.waitForSelector('.item_box_main .item_price', {
+    // Даем сайту время "прийти в себя" после загрузки
+    await new Promise(r => setTimeout(r, 5000));
+
+    await page.waitForSelector('.item_box_main', {
       timeout: RESULTS_TIMEOUT_MS,
     });
   } catch (err) {
-    const content = await page.evaluate(() => document.body.innerText.substring(0, 500));
+    const pageTitle = await page.title();
+    const content = await page.evaluate(() => document.body.innerText.substring(0, 300));
+    const url = page.url();
+    
+    console.log(`    ⚠️  Salidzini.lv: Failed to load results.`);
+    console.log(`       URL: ${url}`);
+    console.log(`       Title: "${pageTitle}"`);
+    console.log(`       Snippet: ${content.replace(/\n/g, ' ')}`);
+    
     if (content.toLowerCase().includes('robot') || content.toLowerCase().includes('human') || content.toLowerCase().includes('verify')) {
-      console.log('    ⚠️  Salidzini.lv: Bot detection (Captcha/Challenge) detected.');
-    } else if (content.toLowerCase().includes('netika atrasts') || content.toLowerCase().includes('не найдено')) {
-      console.log('    ⚠️  Salidzini.lv: No results found for query.');
-    } else {
-      console.log(`    ⚠️  Salidzini.lv: Waiting for selector failed. Content snippet: ${content.replace(/\n/g, ' ')}`);
+      console.log('       🛑 Причина: Обнаружена защита от ботов (Captcha).');
     }
     return [];
   }
