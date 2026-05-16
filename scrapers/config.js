@@ -1,0 +1,4 @@
+module.exports = {
+  NAVIGATION_TIMEOUT_MS: 60_000,
+  RESULTS_TIMEOUT_MS: 20_000,
+};
