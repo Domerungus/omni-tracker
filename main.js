@@ -217,6 +217,8 @@ async function runTracker() {
       await sendTelegramAlert(tgSummary);
     }
   } finally {
+    if (browser) {
+      await browser.close();
     }
     console.log('✅ Итерация runTracker завершена. Ожидание следующего запуска...');
   }
