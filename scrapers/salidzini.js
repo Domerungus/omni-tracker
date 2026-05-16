@@ -7,14 +7,26 @@ async function scrapeSalidzini(page, component, dynamicFloor) {
   const query = component.search_keywords_salidzini;
   const searchUrl = `${SALIDZINI_SEARCH}?q=${encodeURIComponent(query)}`;
 
-  await page.goto(searchUrl, {
-    waitUntil: 'domcontentloaded',
-    timeout: NAVIGATION_TIMEOUT_MS,
-  });
+  try {
+    await page.goto(searchUrl, {
+      waitUntil: 'networkidle2',
+      timeout: NAVIGATION_TIMEOUT_MS,
+    });
 
-  await page.waitForSelector('.item_box_main .item_price', {
-    timeout: RESULTS_TIMEOUT_MS,
-  });
+    await page.waitForSelector('.item_box_main .item_price', {
+      timeout: RESULTS_TIMEOUT_MS,
+    });
+  } catch (err) {
+    const content = await page.evaluate(() => document.body.innerText.substring(0, 500));
+    if (content.toLowerCase().includes('robot') || content.toLowerCase().includes('human') || content.toLowerCase().includes('verify')) {
+      console.log('    ⚠️  Salidzini.lv: Bot detection (Captcha/Challenge) detected.');
+    } else if (content.toLowerCase().includes('netika atrasts') || content.toLowerCase().includes('не найдено')) {
+      console.log('    ⚠️  Salidzini.lv: No results found for query.');
+    } else {
+      console.log(`    ⚠️  Salidzini.lv: Waiting for selector failed. Content snippet: ${content.replace(/\n/g, ' ')}`);
+    }
+    return [];
+  }
 
   const offers = await page.evaluate(() => {
     function parsePrice(text) {

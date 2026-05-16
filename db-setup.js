@@ -88,8 +88,11 @@ async function seedComponents() {
 }
 
 async function setup() {
-  await resetDevTables();
-  await createTables();
+  // await resetDevTables(); // Removed to preserve data across restarts
+  const hasComponents = await knex.schema.hasTable('components');
+  if (!hasComponents) {
+    await createTables();
+  }
   await seedComponents();
 
   console.log('✅ База tracker.db готова (таблицы: components, price_logs, alerts_history).');
