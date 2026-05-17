@@ -135,16 +135,22 @@ async function scrapeSalidzini(page, component, dynamicFloor) {
 
       const pageTextLower = (offer.title + ' ' + pageData.bodyText).toLowerCase();
 
-      // === MPN BYPASS ===
-      // Если партийник найден в тексте страницы — товар одобряется без доп. проверок
-      if (mpn && pageTextLower.includes(mpn)) {
-        console.log(`      [✅ MPN Match] ${offer.shop_name}: партийник "${component.part_number}" подтверждён.`);
-        validOffers.push(offer);
-        if (validOffers.length >= 3) break;
-        continue;
+      // === MPN HARD CHECK (если партийник задан) ===
+      // Такая же логика, как на Amazon: MPN — единственный авторитет.
+      // Если MPN задан, но НЕ найден на странице — товар отклоняется БЕЗ fallback на ключевые слова.
+      // Это защищает от подмен: например, 4x16GB вместо 2x32GB (оба содержат "64gb").
+      if (mpn) {
+        if (pageTextLower.includes(mpn)) {
+          console.log(`      [✅ MPN Match] ${offer.shop_name}: партийник "${component.part_number}" найден.`);
+          validOffers.push(offer);
+          if (validOffers.length >= 3) break;
+        } else {
+          console.log(`      [Skip] ${offer.shop_name}: MPN "${component.part_number}" НЕ найден на странице.`);
+        }
+        continue; // MPN решает — ключевые слова не используем
       }
 
-      // === Стандартная проверка по ключевым словам ===
+      // === Стандартная проверка (только для компонентов без MPN — видеокарты) ===
       const hasPos = hasPositiveKeyword(pageData.bodyText, component.positive_keywords);
       const hasNeg = hasNegativeKeyword(offer.title + ' ' + pageData.coreText, component.negative_keywords);
       const isUsed = isUsedCondition(offer.title + ' ' + pageData.coreText);
