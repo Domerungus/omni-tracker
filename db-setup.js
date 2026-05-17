@@ -10,8 +10,8 @@ const COMPONENTS_SEED = [
   // --- Компоненты с точными MPN (100% идентификация) ---
   {
     name: 'AMD Ryzen 9 9950X',
-    target_price: 650,
-    part_number: '100-100001277WOF',          // WOF = Without Fan (без кулера в коробке)
+    target_price: 417.69,              // Рекорд из логов (iport.lv)
+    part_number: '100-100001277WOF',
     search_keywords_salidzini: 'Ryzen 9 9950X',
     search_keywords_amazon: 'AMD Ryzen 9 9950X',
     positive_keywords: '9950x',
@@ -19,26 +19,26 @@ const COMPONENTS_SEED = [
   },
   {
     name: 'ASUS PROART X870E-CREATOR',
-    target_price: 425,
-    part_number: '90MB1IG0-M0EAY0',           // Европейский артикул платы
+    target_price: 390.99,              // Рекорд из логов (aio.lv)
+    part_number: '90MB1IG0-M0EAY0',
     search_keywords_salidzini: 'PROART X870E-CREATOR',
     search_keywords_amazon: 'ASUS ProArt X870E-CREATOR',
     positive_keywords: 'x870e',
     negative_keywords: 'monobloks, monoblock, priekš, for, block, dzesētājs, water',
   },
   {
-    name: '64GB Kingston Fury Beast 6000MHz CL30',
-    target_price: 220,
-    part_number: 'KF560C30BBEK2-64',          // Точный кит 2x32GB на 6000MHz CL30
+    name: '64GB (2x32GB) Kingston Fury Beast 6000MHz',
+    target_price: 220.00,              // Отличная цена для комплекта 2x32
+    part_number: 'KF560C30BBEK2-64',  // Артикул именно комплекта из двух планок
     search_keywords_salidzini: 'Kingston Fury Beast 6000 64GB',
     search_keywords_amazon: 'Kingston Fury Beast 64GB 6000MT/s',
     positive_keywords: '64gb',
-    negative_keywords: '32gb, 16gb, 1x64gb',
+    negative_keywords: '32gb, 16gb, 1x64gb, 8gb',
   },
   {
     name: 'Samsung 990 PRO 2TB',
-    target_price: 170,
-    part_number: 'MZ-V9P2T0BW',              // BW = без радиатора (ProArt имеет свои)
+    target_price: 159.99,              // Сильный таргет для скидок Amazon
+    part_number: 'MZ-V9P2T0BW',
     search_keywords_salidzini: 'Samsung 990 PRO 2TB',
     search_keywords_amazon: 'Samsung 990 PRO 2TB NVMe',
     positive_keywords: '990',
@@ -46,8 +46,8 @@ const COMPONENTS_SEED = [
   },
   {
     name: 'be quiet! Dark Power Pro 13 1600W',
-    target_price: 370,
-    part_number: 'BN332',                     // Уникальный код модели 1600W
+    target_price: 363.54,              // Рекорд из логов (itworkshop.lv)
+    part_number: 'BN332',
     search_keywords_salidzini: 'Dark Power Pro 13 1600W',
     search_keywords_amazon: 'be quiet Dark Power Pro 13 1600W',
     positive_keywords: '1600w',
@@ -55,26 +55,26 @@ const COMPONENTS_SEED = [
   },
   {
     name: 'Noctua NH-D15 G2 LBC',
-    target_price: 152,
-    part_number: 'NH-D15 G2 LBC',            // Noctua использует название как артикул
+    target_price: 143.25,              // Рекорд из логов (multo.eu)
+    part_number: 'NH-D15 G2 LBC',
     search_keywords_salidzini: 'Noctua NH-D15 G2 LBC',
     search_keywords_amazon: 'Noctua NH-D15 G2 LBC',
     positive_keywords: 'g2 lbc',
     negative_keywords: 'mounting, bracket, kit, stiprinājums, hbc, standard',
   },
   {
-    name: 'Fractal Design Meshify 3 XL (Black)',
-    target_price: 174,
-    part_number: 'FD-C-MES3X-02',            // 02 = стандартное стекло (не тонированное)
+    name: 'Fractal Design Meshify 3 XL',
+    target_price: 109.00,              // Рекорд из логов (buconto.com)
+    part_number: 'FD-C-MES3X-02',
     search_keywords_salidzini: 'Meshify 3 XL',
     search_keywords_amazon: 'Fractal Design Meshify 3 XL',
     positive_keywords: 'xl',
     negative_keywords: 'panel, stikls, glass, front, filter',
   },
   {
-    name: 'Arctic P14 PWM PST (140mm)',
-    target_price: 8,
-    part_number: 'ACFAN00138A',              // Точный артикул черного вентилятора
+    name: 'Arctic P14 PWM PST',
+    target_price: 6.78,                // Рекорд из логов (amazon.de)
+    part_number: 'ACFAN00138A',
     search_keywords_salidzini: 'Arctic P14 PWM PST Black 140mm',
     search_keywords_amazon: 'Arctic P14 PWM PST 140mm',
     positive_keywords: 'p14',
@@ -82,10 +82,9 @@ const COMPONENTS_SEED = [
   },
   // --- Видеокарты: MPN НЕ используем! ---
   // Nvidia делает только чип. Карты собирают ASUS, MSI, Gigabyte, Palit, Zotac и т.д.
-  // У каждого вендора 5–10 модификаций со своими MPN. Ищем по ключевым словам.
   {
     name: 'Nvidia RTX 3090 (24GB)',
-    target_price: 700,
+    target_price: 950.00,              // Рекорд из логов (707.lv)
     part_number: '',
     search_keywords_salidzini: 'RTX 3090',
     search_keywords_amazon: 'Nvidia RTX 3090 24GB',
@@ -94,7 +93,7 @@ const COMPONENTS_SEED = [
   },
   {
     name: 'Nvidia RTX 4090 (24GB)',
-    target_price: 1800,
+    target_price: 1800.00,             // Жесткий минимум для отсечения ПК
     part_number: '',
     search_keywords_salidzini: 'RTX 4090',
     search_keywords_amazon: 'Nvidia RTX 4090 24GB',
