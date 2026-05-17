@@ -136,10 +136,10 @@ async function processSSRows(page, rows, component) {
         return { msg };
       });
 
-      const pageTextLower = (row.title + ' ' + pageData.msg).toLowerCase();
-
       // === MPN BYPASS ===
-      if (mpn && pageTextLower.includes(mpn)) {
+      // (проверяем только в тексте объявления, не в хлебных крошках)
+      const msgLower = pageData.msg.toLowerCase();
+      if (mpn && msgLower.includes(mpn)) {
         console.log(`      [✅ MPN Match] ss.com: партийник "${component.part_number}" подтверждён.`);
         validOffers.push({
           shop_name: 'ss.com',
@@ -153,8 +153,11 @@ async function processSSRows(page, rows, component) {
       }
 
       // === Стандартная проверка ===
+      // Негативные слова проверяем ТОЛЬКО в тексте объявления (msg),
+      // НЕ в row.title, так как он содержит хлебные крошки категории
+      // (например "Datori un orgtehnika : Datori") и вызывает ложные срабатывания.
       const hasPos = hasPositiveKeyword(pageData.msg, component.positive_keywords);
-      const hasNeg = hasNegativeKeyword(row.title + ' ' + pageData.msg, component.negative_keywords);
+      const hasNeg = hasNegativeKeyword(pageData.msg, component.negative_keywords);
       const isUsed = isUsedCondition(pageData.msg);
 
       if (!hasPos || hasNeg || isUsed) {
