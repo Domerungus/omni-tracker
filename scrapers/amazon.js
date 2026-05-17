@@ -20,11 +20,14 @@ function normalizeAmazonUrl(href) {
 }
 
 async function scrapeAmazon(page, component, dynamicFloor) {
-  const query = component.search_keywords_amazon;
+  const query = component.part_number && component.part_number.trim()
+    ? component.part_number.trim()
+    : component.search_keywords_amazon;
+
   if (!query) return [];
 
   const searchUrl = `${AMAZON_SEARCH}${encodeURIComponent(query).replace(/%20/g, '+')}`;
-
+  console.log(`    🔎 Amazon запрос: "${query}"${component.part_number ? ' (по MPN)' : ''}`);
   await page.goto(searchUrl, {
     waitUntil: 'domcontentloaded',
     timeout: NAVIGATION_TIMEOUT_MS,

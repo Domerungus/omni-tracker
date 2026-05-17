@@ -6,6 +6,7 @@ const SALIDZINI_SEARCH = 'https://www.salidzini.lv/cena';
 async function scrapeSalidzini(page, component, dynamicFloor) {
   const query = component.search_keywords_salidzini;
   const searchUrl = `${SALIDZINI_SEARCH}?q=${encodeURIComponent(query)}`;
+  const mpn = (component.part_number || '').trim().toLowerCase();
 
   try {
     await page.setExtraHTTPHeaders({
@@ -37,7 +38,7 @@ async function scrapeSalidzini(page, component, dynamicFloor) {
     const pageTitle = await page.title();
     const content = await page.evaluate(() => document.body?.innerText?.substring(0, 300) || 'EMPTY BODY');
     const url = page.url();
-    
+
     console.log(`    ⚠️  Salidzini.lv: Failed to load results.`);
     console.log(`       URL: ${url}`);
     console.log(`       Title: "${pageTitle}"`);
@@ -92,7 +93,6 @@ async function scrapeSalidzini(page, component, dynamicFloor) {
         url = `${location.origin}${url}`;
       }
 
-      // Clean title: take first line and remove breadcrumbs
       let title = (productLink?.textContent || '').trim().split('\n')[0];
       title = title.split('«')[0].split('<')[0].trim();
 
@@ -125,18 +125,26 @@ async function scrapeSalidzini(page, component, dynamicFloor) {
         timeout: NAVIGATION_TIMEOUT_MS,
       });
 
-      // Wait for dynamic content to render (descriptions, price blocks, etc.)
       await new Promise((r) => setTimeout(r, 2000));
 
       const pageData = await page.evaluate(() => {
         const h1 = document.querySelector('h1')?.innerText || '';
         const bodyText = document.body.innerText || '';
-        return {
-          coreText: h1,
-          bodyText
-        };
+        return { coreText: h1, bodyText };
       });
-      
+
+      const pageTextLower = (offer.title + ' ' + pageData.bodyText).toLowerCase();
+
+      // === MPN BYPASS ===
+      // Если партийник найден в тексте страницы — товар одобряется без доп. проверок
+      if (mpn && pageTextLower.includes(mpn)) {
+        console.log(`      [✅ MPN Match] ${offer.shop_name}: партийник "${component.part_number}" подтверждён.`);
+        validOffers.push(offer);
+        if (validOffers.length >= 3) break;
+        continue;
+      }
+
+      // === Стандартная проверка по ключевым словам ===
       const hasPos = hasPositiveKeyword(pageData.bodyText, component.positive_keywords);
       const hasNeg = hasNegativeKeyword(offer.title + ' ' + pageData.coreText, component.negative_keywords);
       const isUsed = isUsedCondition(offer.title + ' ' + pageData.coreText);
@@ -145,7 +153,7 @@ async function scrapeSalidzini(page, component, dynamicFloor) {
         validOffers.push(offer);
         if (validOffers.length >= 3) break;
       } else {
-        console.log(`      [Skip] ${offer.shop_name}: Failed keyword check. hasPos: ${hasPos}, hasNeg: ${hasNeg}, isUsed: ${isUsed}`);
+        console.log(`      [Skip] ${offer.shop_name}: hasPos: ${hasPos}, hasNeg: ${hasNeg}, isUsed: ${isUsed}`);
       }
     } catch (err) {
       console.log(`      [Skip] ${offer.shop_name}: Could not load page.`);

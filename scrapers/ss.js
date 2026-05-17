@@ -110,6 +110,7 @@ async function scrapeSS(page, component, dynamicFloor) {
 }
 
 async function processSSRows(page, rows, component) {
+  const mpn = (component.part_number || '').trim().toLowerCase();
   const sortedRows = rows
     .map(row => ({ ...row, price: parseEuroPrice(row.priceText) }))
     .filter(row => row.price != null && row.link)
@@ -134,7 +135,24 @@ async function processSSRows(page, rows, component) {
         const msg = document.querySelector('#msg_div_msg')?.innerText || '';
         return { msg };
       });
-      
+
+      const pageTextLower = (row.title + ' ' + pageData.msg).toLowerCase();
+
+      // === MPN BYPASS ===
+      if (mpn && pageTextLower.includes(mpn)) {
+        console.log(`      [✅ MPN Match] ss.com: партийник "${component.part_number}" подтверждён.`);
+        validOffers.push({
+          shop_name: 'ss.com',
+          price: row.price,
+          url: row.link,
+          source: 'ss.com',
+          title: row.title,
+        });
+        if (validOffers.length >= 3) break;
+        continue;
+      }
+
+      // === Стандартная проверка ===
       const hasPos = hasPositiveKeyword(pageData.msg, component.positive_keywords);
       const hasNeg = hasNegativeKeyword(row.title + ' ' + pageData.msg, component.negative_keywords);
       const isUsed = isUsedCondition(pageData.msg);
