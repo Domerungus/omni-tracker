@@ -20,14 +20,18 @@ function normalizeAmazonUrl(href) {
 }
 
 async function scrapeAmazon(page, component, dynamicFloor) {
-  const query = component.part_number && component.part_number.trim()
-    ? component.part_number.trim()
-    : component.search_keywords_amazon;
+  const mpn = (component.part_number || '').trim();
 
-  if (!query) return [];
+  // Amazon используем ТОЛЬКО для поиска по партийнику.
+  // Видеокарты и другие компоненты без MPN — пропускаем.
+  if (!mpn) {
+    console.log(`    ⏭️  Amazon.de: пропущен (нет MPN для точного поиска).`);
+    return [];
+  }
 
-  const searchUrl = `${AMAZON_SEARCH}${encodeURIComponent(query).replace(/%20/g, '+')}`;
-  console.log(`    🔎 Amazon запрос: "${query}"${component.part_number ? ' (по MPN)' : ''}`);
+  const searchUrl = `${AMAZON_SEARCH}${encodeURIComponent(mpn).replace(/%20/g, '+')}`;
+  console.log(`    🔎 Amazon запрос по MPN: "${mpn}"`);
+
   await page.goto(searchUrl, {
     waitUntil: 'domcontentloaded',
     timeout: NAVIGATION_TIMEOUT_MS,
