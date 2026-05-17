@@ -3,7 +3,7 @@ const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const cron = require('node-cron');
 const knex = require('knex');
-const { sendTelegramAlert } = require('./telegram');
+const { sendTelegramAlert, sendPriceDropAlert } = require('./telegram');
 const { printBuildSummary } = require('./lib/summary');
 
 // Подключаем парсеры
@@ -17,7 +17,9 @@ puppeteer.use(StealthPlugin());
 const BROWSER_ARGS = ['--start-maximized', '--lang=lv-LV,lv'];
 const NAVIGATION_TIMEOUT_MS = 60000;
 const RESULTS_TIMEOUT_MS = 30000;
-const DYNAMIC_FLOOR_RATIO = 0.45; // Игнорим всё, что дешевле 45% от цели (обычно это мусор)
+const DYNAMIC_FLOOR_RATIO = 0.45;
+const CRON_SCHEDULE = process.env.CRON_SCHEDULE || '0 */6 * * *';
+const PRICE_CHANGE_THRESHOLD_PCT = parseFloat(process.env.PRICE_CHANGE_THRESHOLD_PCT || '1');
 
 const db = knex({
   client: 'better-sqlite3',
@@ -26,16 +28,29 @@ const db = knex({
 });
 
 /**
- * Логика обработки одного компонента
+ * Получить последнюю сохранённую цену для компонента из БД.
+ * Возвращает число или null.
+ */
+async function getPreviousPrice(componentId) {
+  const row = await db('price_logs')
+    .where({ component_id: componentId })
+    .orderBy('scraped_at', 'desc')
+    .first();
+  return row ? Number(row.price) : null;
+}
+
+/**
+ * Логика обработки одного компонента.
+ * Возвращает объект best offer или null.
  */
 async function processComponent(page, component, index, total) {
   console.log('════════════════════════════════════════════════════');
   console.log(`🔧 [${index + 1}/${total}] ${component.name}`);
   console.log(`   🎯 Целевая цена: ${component.target_price} €`);
-  
+
   const dynamicFloor = component.target_price ? component.target_price * DYNAMIC_FLOOR_RATIO : null;
   if (dynamicFloor) console.log(`   📉 Динамический порог (45%): ${dynamicFloor.toFixed(2)} €`);
-  
+
   console.log('════════════════════════════════════════════════════');
 
   const allOffers = [];
@@ -75,12 +90,11 @@ async function processComponent(page, component, index, total) {
     return null;
   }
 
-  // Сортировка по цене
   const sorted = allOffers.sort((a, b) => a.price - b.price);
   const best = sorted[0];
 
   console.log(`\n   💾 Лучшая цена: ${best.price} € @ ${best.shop_name} (${best.source})`);
-  
+
   // Сохранение в базу
   await db('price_logs').insert({
     component_id: component.id,
@@ -99,51 +113,102 @@ async function runTracker() {
   let browser;
   try {
     console.log('\n🚀 Omni-Tracker — Запуск сессии поиска цен...');
-    
+
     const components = await db('components').select('*').orderBy('id');
     if (components.length === 0) {
       console.error('❌ Ошибка: Таблица components пуста. Запустите npm run db:setup');
       return;
     }
 
+    // --- Загружаем предыдущие цены ДО запуска браузера ---
+    const previousPrices = {};
+    for (const c of components) {
+      previousPrices[c.id] = await getPreviousPrice(c.id);
+    }
+
     browser = await puppeteer.launch({
-      headless: true, // Фоновый режим
+      headless: true,
       args: BROWSER_ARGS,
-      defaultViewport: null
+      defaultViewport: null,
     });
 
-    // Устанавливаем глобальный User-Agent (Desktop), чтобы Amazon не думал, что мы с iPhone
-    const context = browser.defaultBrowserContext();
-    await context.overridePermissions('https://www.amazon.de', ['notifications']);
-    
-    // Применяем UA ко всем новым страницам
+    // Глобальный Desktop User-Agent
     browser.on('targetcreated', async (target) => {
       const page = await target.page();
       if (page) {
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+        await page.setUserAgent(
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+        );
       }
     });
 
     const sessionResults = [];
 
     for (let i = 0; i < components.length; i++) {
+      const component = components[i];
       const page = await browser.newPage();
       page.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
       page.setDefaultTimeout(RESULTS_TIMEOUT_MS);
 
       try {
-        const bestOffer = await processComponent(page, components[i], i, components.length);
+        const bestOffer = await processComponent(page, component, i, components.length);
+
         if (bestOffer) {
+          const prevPrice = previousPrices[component.id];
+          const currentPrice = bestOffer.price;
+          const target = Number(component.target_price);
+
+          // --- Вычисляем тренд ---
+          let trend = '→';
+          let delta = null;
+
+          if (prevPrice != null) {
+            delta = prevPrice - currentPrice; // >0 = цена упала (хорошо), <0 = выросла
+            if (Math.abs(delta) < 0.005) {
+              trend = '→'; // без изменений
+            } else if (delta > 0) {
+              trend = '↓'; // цена упала
+            } else {
+              trend = '↑'; // цена выросла
+            }
+          }
+
+          const trendStr = delta != null
+            ? `${trend} ${delta > 0 ? '-' : '+'}${Math.abs(delta).toFixed(2)} €`
+            : trend;
+
+          console.log(`   📈 Тренд: ${trendStr}${prevPrice != null ? ` (было: ${prevPrice.toFixed(2)} €)` : ' (первая запись)'}`);
+
+          // --- 🚨 МГНОВЕННЫЙ АЛЕРТ: цена упала ниже цели ---
+          if (currentPrice <= target) {
+            const saving = target - currentPrice;
+            console.log(`   🚨 ЦЕНА ПОД ЦЕЛЬЮ! Отправляем алерт...`);
+            await sendPriceDropAlert(component, bestOffer, saving);
+          }
+
+          // --- Дедупликация: блокируем обычный алерт если изменение < порога ---
+          let shouldAlert = true;
+          if (prevPrice != null && delta != null) {
+            const changePct = (Math.abs(delta) / prevPrice) * 100;
+            if (changePct < PRICE_CHANGE_THRESHOLD_PCT) {
+              console.log(`   🔕 Изменение цены (${changePct.toFixed(2)}%) ниже порога ${PRICE_CHANGE_THRESHOLD_PCT}% — алерт заблокирован.`);
+              shouldAlert = false;
+            }
+          }
+
           sessionResults.push({
-            name: components[i].name,
-            target: components[i].target_price,
-            current: bestOffer.price,
+            name: component.name,
+            target,
+            current: currentPrice,
             url: bestOffer.url,
-            shop_name: bestOffer.shop_name
+            shop_name: bestOffer.shop_name,
+            trend: trendStr,
+            prevPrice,
+            shouldAlert,
           });
         }
       } catch (err) {
-        console.error(`   ❌ Критическая ошибка при обработке ${components[i].name}:`, err.message);
+        console.error(`   ❌ Критическая ошибка при обработке ${component.name}:`, err.message);
       } finally {
         await page.close();
       }
@@ -151,8 +216,8 @@ async function runTracker() {
       // Пауза между компонентами
       if (i < components.length - 1) {
         const pause = 5000 + Math.random() * 3000;
-        console.log(`   ⏳ Ожидание ${Math.round(pause/1000)} сек...`);
-        await new Promise(r => setTimeout(r, pause));
+        console.log(`   ⏳ Ожидание ${Math.round(pause / 1000)} сек...`);
+        await new Promise((r) => setTimeout(r, pause));
       }
     }
 
@@ -162,7 +227,6 @@ async function runTracker() {
       await sendTelegramAlert(summaryHtml);
       console.log('✅ Отчет отправлен в Telegram.');
     }
-
   } catch (err) {
     console.error('❌ Ошибка в runTracker:', err);
   } finally {
@@ -172,9 +236,9 @@ async function runTracker() {
 }
 
 // --- ЗАПУСК ПО РАСПИСАНИЮ ---
-console.log('🕒 Бот активен. Расписание: каждые 6 часов.');
+console.log(`🕒 Бот активен. Расписание: "${CRON_SCHEDULE}"`);
 
-cron.schedule('0 */6 * * *', () => {
+cron.schedule(CRON_SCHEDULE, () => {
   console.log('\n⏰ [CRON] Время проверять цены!');
   runTracker();
 });
