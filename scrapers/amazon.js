@@ -144,8 +144,24 @@ async function scrapeAmazon(page, component, dynamicFloor) {
       }
 
       const fullText = `${pageData.title}\n${pageData.bullets}\n${pageData.desc}`;
-      
-      // Strict check: Title must contain positive keywords if we are dealing with variants (like 1TB/2TB)
+      const fullTextLower = fullText.toLowerCase();
+      const mpn = (component.part_number || '').trim().toLowerCase();
+
+      // === MPN HARD CHECK ===
+      // Если мы искали по партийнику — он ОБЯЗАН присутствовать на странице товара.
+      // Это защищает от подмены (например, Amazon выдал 990 EVO Plus вместо 990 PRO).
+      if (mpn) {
+        if (fullTextLower.includes(mpn)) {
+          console.log(`      [✅ MPN Match] amazon.de: партийник "${component.part_number}" найден на странице.`);
+          finalOffers.push(offer);
+          if (finalOffers.length >= 3) break;
+        } else {
+          console.log(`      [Skip] amazon.de: MPN "${component.part_number}" НЕ найден на странице. Товар отклонён.`);
+        }
+        continue; // При поиске по MPN — только MPN решает, ключевые слова не используем
+      }
+
+      // === Стандартная проверка по ключевым словам (только для товаров без MPN — видеокарты и т.д.) ===
       const titleHasPos = hasPositiveKeyword(pageData.title, component.positive_keywords);
       const bodyHasPos = hasPositiveKeyword(fullText, component.positive_keywords);
       const hasNeg = hasNegativeKeyword(fullText, component.negative_keywords);
@@ -155,7 +171,7 @@ async function scrapeAmazon(page, component, dynamicFloor) {
         finalOffers.push(offer);
         if (finalOffers.length >= 3) break;
       } else {
-        console.log(`      [Skip] amazon.de: Failed keyword check. Title has pos: ${titleHasPos}, Body has pos: ${bodyHasPos}, hasNeg: ${hasNeg}, isUsed: ${isUsed}`);
+        console.log(`      [Skip] amazon.de: titleHasPos: ${titleHasPos}, bodyHasPos: ${bodyHasPos}, hasNeg: ${hasNeg}, isUsed: ${isUsed}`);
       }
     } catch (err) {
       console.log(`      [Skip] amazon.de: Could not load page.`);
