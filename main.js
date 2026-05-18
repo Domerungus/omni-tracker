@@ -179,21 +179,23 @@ async function runTracker() {
 
           console.log(`   📈 Тренд: ${trendStr}${prevPrice != null ? ` (было: ${prevPrice.toFixed(2)} €)` : ' (первая запись)'}`);
 
-          // --- 🚨 МГНОВЕННЫЙ АЛЕРТ: цена упала ниже цели ---
-          // --- 🏆 Динамический таргет: новый рекорд → обновляем target_price в БД ---
+          // --- 🏆 Динамический таргет: лучшая найденная цена → новый базис ---
+          // Каждую сессию target_price = текущая лучшая цена.
+          // Следующая сессия сравнивает с этим базисом: дешевеет рынок (↓) или дорожает (↑)?
           if (currentPrice < target) {
-            await db('components')
-              .where({ id: component.id })
-              .update({ target_price: currentPrice });
-            console.log(`   🏆 Новый рекорд! ${currentPrice.toFixed(2)} € (было: ${target.toFixed(2)} €) — цель обновлена.`);
-            // Обновляем локально, чтобы алерт и отчёт использовали новую цель
-            component.target_price = currentPrice;
-
-            // Мгновенный алерт о новом рекорде
+            // Новый рекорд — отправляем алерт ДО обновления target в объекте,
+            // чтобы алерт показал правильную "старую цель" и сэкономию
             const saving = target - currentPrice;
+            console.log(`   🏆 Новый рекорд! ${currentPrice.toFixed(2)} € (было: ${target.toFixed(2)} €) — цель обновлена.`);
             console.log(`   🚨 НОВЫЙ РЕКОРД ЦЕНЫ! Отправляем алерт...`);
             await sendPriceDropAlert(component, bestOffer, saving);
           }
+
+          // Всегда обновляем target_price в БД до текущей цены (для тренда в следующей сессии)
+          await db('components')
+            .where({ id: component.id })
+            .update({ target_price: currentPrice });
+          component.target_price = currentPrice;
 
           // --- Дедупликация: блокируем обычный алерт если изменение < порога ---
           let shouldAlert = true;
