@@ -163,7 +163,9 @@ async function seedComponents() {
         negative_keywords: item.negative_keywords,
       })
       .onConflict('name')
-      .merge(['part_number', 'search_keywords_salidzini', 'search_keywords_amazon', 'target_price', 'positive_keywords', 'negative_keywords']);
+      // target_price намеренно НЕ в списке merge — динамически обновлённые рекорды сохраняются.
+      // Чтобы сбросить таргеты к seed-значениям, нужен полный npm run db:setup (с resetDevTables).
+      .merge(['part_number', 'search_keywords_salidzini', 'search_keywords_amazon', 'positive_keywords', 'negative_keywords']);
   }
 
   const { count } = await knex('components').count({ count: '*' }).first();

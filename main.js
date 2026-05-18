@@ -180,9 +180,18 @@ async function runTracker() {
           console.log(`   📈 Тренд: ${trendStr}${prevPrice != null ? ` (было: ${prevPrice.toFixed(2)} €)` : ' (первая запись)'}`);
 
           // --- 🚨 МГНОВЕННЫЙ АЛЕРТ: цена упала ниже цели ---
-          if (currentPrice <= target) {
+          // --- 🏆 Динамический таргет: новый рекорд → обновляем target_price в БД ---
+          if (currentPrice < target) {
+            await db('components')
+              .where({ id: component.id })
+              .update({ target_price: currentPrice });
+            console.log(`   🏆 Новый рекорд! ${currentPrice.toFixed(2)} € (было: ${target.toFixed(2)} €) — цель обновлена.`);
+            // Обновляем локально, чтобы алерт и отчёт использовали новую цель
+            component.target_price = currentPrice;
+
+            // Мгновенный алерт о новом рекорде
             const saving = target - currentPrice;
-            console.log(`   🚨 ЦЕНА ПОД ЦЕЛЬЮ! Отправляем алерт...`);
+            console.log(`   🚨 НОВЫЙ РЕКОРД ЦЕНЫ! Отправляем алерт...`);
             await sendPriceDropAlert(component, bestOffer, saving);
           }
 
@@ -198,7 +207,7 @@ async function runTracker() {
 
           sessionResults.push({
             name: component.name,
-            target,
+            target: Number(component.target_price), // актуальный таргет (мог обновиться)
             current: currentPrice,
             url: bestOffer.url,
             shop_name: bestOffer.shop_name,
