@@ -115,7 +115,21 @@ async function scrapeAmazon(page, component, dynamicFloor) {
         const title = document.querySelector('#productTitle')?.innerText || '';
         const bullets = document.querySelector('#feature-bullets')?.innerText || '';
         const desc = document.querySelector('#productDescription')?.innerText || '';
-        
+
+        // Таблица технических характеристик — здесь Amazon хранит MPN/Model Number
+        const techSpecsSelectors = [
+          '#productDetails_techSpec_section_1',
+          '#productDetails_techSpec_section_2',
+          '#tech-specs-section',
+          '#detailBullets_feature_div',
+          '#productDetails_detailBullets_sections1',
+        ];
+        let techSpecs = '';
+        for (const sel of techSpecsSelectors) {
+          const el = document.querySelector(sel);
+          if (el) techSpecs += el.innerText + '\n';
+        }
+
         // Extract price from product page (more reliable for variations)
         let priceText = '';
         const priceSelectors = [
@@ -125,20 +139,20 @@ async function scrapeAmazon(page, component, dynamicFloor) {
           '#priceblock_dealprice',
           'span.a-price-whole'
         ];
-        
+
         for (const selector of priceSelectors) {
           const el = document.querySelector(selector);
           if (el) {
             priceText = el.innerText || el.textContent || '';
             const fractionEl = el.closest('.a-price')?.querySelector('.a-price-fraction');
             if (fractionEl) {
-               priceText += '.' + fractionEl.innerText;
+              priceText += '.' + fractionEl.innerText;
             }
             break;
           }
         }
 
-        return { title, bullets, desc, priceText };
+        return { title, bullets, desc, techSpecs, priceText };
       });
 
       // Update price if found on product page
@@ -147,7 +161,7 @@ async function scrapeAmazon(page, component, dynamicFloor) {
         offer.price = pagePrice;
       }
 
-      const fullText = `${pageData.title}\n${pageData.bullets}\n${pageData.desc}`;
+      const fullText = `${pageData.title}\n${pageData.bullets}\n${pageData.desc}\n${pageData.techSpecs}`;
       const fullTextLower = fullText.toLowerCase();
       const mpn = (component.part_number || '').trim().toLowerCase();
 
