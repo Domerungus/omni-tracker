@@ -130,8 +130,48 @@ async function scrapeSalidzini(page, component, dynamicFloor) {
       const pageData = await page.evaluate(() => {
         const h1 = document.querySelector('h1')?.innerText || '';
         const bodyText = document.body.innerText || '';
-        return { coreText: h1, bodyText };
+
+        // --- Читаем РЕАЛЬНУЮ цену со страницы магазина ---
+        // Salidzini хранит кэшированную цену, которая может устареть.
+        let livePrice = null;
+
+        // 1. JSON-LD (самый надёжный источник)
+        for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
+          try {
+            const data = JSON.parse(script.textContent);
+            const items = Array.isArray(data) ? data : [data];
+            for (const item of items) {
+              const offers = item?.offers;
+              if (!offers) continue;
+              const offerList = Array.isArray(offers) ? offers : [offers];
+              for (const o of offerList) {
+                const p = parseFloat(o?.price);
+                if (!isNaN(p) && p > 0) { livePrice = p; break; }
+              }
+              if (livePrice) break;
+            }
+          } catch {}
+          if (livePrice) break;
+        }
+
+        // 2. Open Graph / meta price
+        if (!livePrice) {
+          const metaPrice = document.querySelector(
+            'meta[property="product:price:amount"], meta[name="price"], meta[itemprop="price"]'
+          );
+          if (metaPrice) livePrice = parseFloat(metaPrice.getAttribute('content'));
+        }
+
+        return { coreText: h1, bodyText, livePrice };
       });
+
+      // Если удалось прочитать живую цену — обновляем offer
+      if (pageData.livePrice && pageData.livePrice > 0) {
+        if (Math.abs(pageData.livePrice - offer.price) > 0.5) {
+          console.log(`      [💰 Live Price] ${offer.shop_name}: Salidzini=${offer.price}€ → реальная=${pageData.livePrice}€`);
+        }
+        offer.price = pageData.livePrice;
+      }
 
       const pageTextLower = (offer.title + ' ' + pageData.bodyText).toLowerCase();
 
