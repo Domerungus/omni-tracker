@@ -108,8 +108,23 @@ async function scrapeSalidzini(page, component, dynamicFloor) {
     return items;
   });
 
+  // Магазины, которые не проходят фильтр: ненадёжные маркетплейсы, Китай, дропшипперы
+  const SHOP_BLACKLIST = [
+    'joom.com', 'joom',
+    'aliexpress', 'ali express',
+    'wish.com', 'wish',
+    'banggood', 'banggood.com',
+    'gearbest', 'dhgate',
+    'ebay',     // объявления, не фикс. цена
+  ];
+
   const validItems = [];
   for (const item of offers) {
+    const shopLower = item.shop_name.toLowerCase();
+    if (SHOP_BLACKLIST.some(b => shopLower.includes(b))) {
+      console.log(`      [Skip] Salidzini: магазин в блэклисте — ${item.shop_name}`);
+      continue;
+    }
     if (dynamicFloor && item.price < dynamicFloor) continue;
     if (isUsedCondition(item.title)) continue;
     validItems.push(item);
