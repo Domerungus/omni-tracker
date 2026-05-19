@@ -161,6 +161,7 @@ async function scrapeSalidzini(page, component, dynamicFloor) {
         let livePrice = null;
 
         // 1. JSON-LD Schema.org (самый надёжный)
+        const EU_VAT = 1.21; // НДС Латвии 21%
         for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
           try {
             const data = JSON.parse(script.textContent);
@@ -171,7 +172,11 @@ async function scrapeSalidzini(page, component, dynamicFloor) {
               const offerList = Array.isArray(offers) ? offers : [offers];
               for (const o of offerList) {
                 const p = parseFloat(o?.price);
-                if (!isNaN(p) && p > 0) { livePrice = p; break; }
+                if (isNaN(p) || p <= 0) continue;
+                // valueAddedTaxIncluded: false → цена БЕЗ НДС → умножаем на 1.21
+                const taxIncluded = o?.valueAddedTaxIncluded;
+                livePrice = (taxIncluded === false) ? Math.round(p * EU_VAT * 100) / 100 : p;
+                break;
               }
               if (livePrice) break;
             }
@@ -210,10 +215,20 @@ async function scrapeSalidzini(page, component, dynamicFloor) {
         if (ratio > 10 || ratio < 0.1) {
           console.log(`      [⚠️  Sanity] ${offer.shop_name}: live=${pageData.livePrice}€ слишком далека от кэша ${cachedPrice}€ → используем кэш`);
         } else {
-          if (Math.abs(pageData.livePrice - cachedPrice) > 0.5) {
-            console.log(`      [💰 Live] ${offer.shop_name}: кэш=${cachedPrice}€ → реальная=${pageData.livePrice}€`);
+          let adjustedPrice = pageData.livePrice;
+
+          // Эвристика: если live / cached ≈ 1/1.21, магазин забыл указать
+          // valueAddedTaxIncluded=false — применяем НДС 21% автоматически
+          const VAT = 1.21;
+          const expectedExVat = cachedPrice / VAT;
+          if (Math.abs(pageData.livePrice - expectedExVat) / expectedExVat < 0.03) {
+            adjustedPrice = Math.round(pageData.livePrice * VAT * 100) / 100;
+            console.log(`      [🧾 VAT] ${offer.shop_name}: цена без НДС ${pageData.livePrice}€ → с НДС ${adjustedPrice}€`);
+          } else if (Math.abs(adjustedPrice - cachedPrice) > 0.5) {
+            console.log(`      [💰 Live] ${offer.shop_name}: кэш=${cachedPrice}€ → реальная=${adjustedPrice}€`);
           }
-          offer.price = pageData.livePrice;
+
+          offer.price = adjustedPrice;
         }
       }
 
