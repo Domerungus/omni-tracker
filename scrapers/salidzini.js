@@ -142,6 +142,12 @@ async function scrapeSalidzini(page, component, dynamicFloor) {
 
       await new Promise((r) => setTimeout(r, 2000));
 
+      // Захватываем реальный URL магазина после редиректа с click.php
+      const realUrl = page.url();
+      if (realUrl && !realUrl.includes('salidzini.lv')) {
+        offer.url = realUrl;
+      }
+
       const pageData = await page.evaluate(() => {
         const h1 = document.querySelector('h1')?.innerText || '';
         const bodyText = document.body.innerText || '';
@@ -175,6 +181,37 @@ async function scrapeSalidzini(page, component, dynamicFloor) {
             'meta[property="product:price:amount"], meta[name="price"], meta[itemprop="price"]'
           );
           if (metaPrice) livePrice = parseFloat(metaPrice.getAttribute('content'));
+        }
+
+        // 3. Популярные CSS-селекторы цены (для магазинов без JSON-LD)
+        if (!livePrice) {
+          const priceSelectors = [
+            '[itemprop="price"]',           // Schema.org атрибут
+            '.price-current',
+            '.current-price',
+            '.product-price',
+            '.woocommerce-Price-amount',     // WooCommerce
+            '.price .amount',
+            '[data-price]',
+            '.price--main',
+            '.sale-price',
+            '#product-price',
+            '.ProductPrice',
+          ];
+          for (const sel of priceSelectors) {
+            const el = document.querySelector(sel);
+            if (!el) continue;
+            // Пробуем content-атрибут, data-price, или текст
+            const raw =
+              el.getAttribute('content') ||
+              el.getAttribute('data-price') ||
+              el.innerText ||
+              '';
+            // Оставляем цифры, точку, запятую
+            const cleaned = raw.replace(/[^\d.,]/g, '').replace(',', '.');
+            const p = parseFloat(cleaned);
+            if (!isNaN(p) && p > 0) { livePrice = p; break; }
+          }
         }
 
         return { coreText: h1, bodyText, livePrice };
