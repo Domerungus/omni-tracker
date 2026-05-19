@@ -130,10 +130,13 @@ async function scrapeSalidzini(page, component, dynamicFloor) {
     validItems.push(item);
   }
 
-  const sortedOffers = validItems.sort((a, b) => a.price - b.price);
-  const validOffers = [];
+  // Посещаем ВСЕ валидные страницы магазинов и собираем живые цены.
+  // Только потом сортируем по реальной цене — иначе кэш Salidzini может исказить порядок.
+  const candidateOffers = [];
 
-  for (const offer of sortedOffers) {
+  validItems.sort((a, b) => a.price - b.price); // предварительная сортировка по кэшу Salidzini
+
+  for (const offer of validItems) {
     try {
       await page.goto(offer.url, {
         waitUntil: 'domcontentloaded',
@@ -153,10 +156,11 @@ async function scrapeSalidzini(page, component, dynamicFloor) {
         const bodyText = document.body.innerText || '';
 
         // --- Читаем РЕАЛЬНУЮ цену со страницы магазина ---
-        // Salidzini хранит кэшированную цену, которая может устареть.
+        // Используем только надёжные структурированные источники.
+        // CSS-селекторы исключены: слишком много ложных срабатываний.
         let livePrice = null;
 
-        // 1. JSON-LD (самый надёжный источник)
+        // 1. JSON-LD Schema.org (самый надёжный)
         for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
           try {
             const data = JSON.parse(script.textContent);
@@ -178,74 +182,63 @@ async function scrapeSalidzini(page, component, dynamicFloor) {
         // 2. Open Graph / meta price
         if (!livePrice) {
           const metaPrice = document.querySelector(
-            'meta[property="product:price:amount"], meta[name="price"], meta[itemprop="price"]'
+            'meta[property="product:price:amount"], meta[name="price"]'
           );
-          if (metaPrice) livePrice = parseFloat(metaPrice.getAttribute('content'));
+          if (metaPrice) {
+            const p = parseFloat(metaPrice.getAttribute('content'));
+            if (!isNaN(p) && p > 0) livePrice = p;
+          }
         }
 
-        // 3. Популярные CSS-селекторы цены (для магазинов без JSON-LD)
+        // 3. itemprop="price" — Schema.org inline атрибут (надёжнее чем CSS)
         if (!livePrice) {
-          const priceSelectors = [
-            '[itemprop="price"]',           // Schema.org атрибут
-            '.price-current',
-            '.current-price',
-            '.product-price',
-            '.woocommerce-Price-amount',     // WooCommerce
-            '.price .amount',
-            '[data-price]',
-            '.price--main',
-            '.sale-price',
-            '#product-price',
-            '.ProductPrice',
-          ];
-          for (const sel of priceSelectors) {
-            const el = document.querySelector(sel);
-            if (!el) continue;
-            // Пробуем content-атрибут, data-price, или текст
-            const raw =
-              el.getAttribute('content') ||
-              el.getAttribute('data-price') ||
-              el.innerText ||
-              '';
-            // Оставляем цифры, точку, запятую
-            const cleaned = raw.replace(/[^\d.,]/g, '').replace(',', '.');
-            const p = parseFloat(cleaned);
-            if (!isNaN(p) && p > 0) { livePrice = p; break; }
+          const el = document.querySelector('[itemprop="price"][content]');
+          if (el) {
+            const p = parseFloat(el.getAttribute('content'));
+            if (!isNaN(p) && p > 0) livePrice = p;
           }
         }
 
         return { coreText: h1, bodyText, livePrice };
       });
 
-      // Если удалось прочитать живую цену — обновляем offer
+      // --- Санитарная проверка live-цены ---
+      const cachedPrice = offer.price; // цена из Salidzini-кэша
       if (pageData.livePrice && pageData.livePrice > 0) {
-        if (Math.abs(pageData.livePrice - offer.price) > 0.5) {
-          console.log(`      [💰 Live Price] ${offer.shop_name}: Salidzini=${offer.price}€ → реальная=${pageData.livePrice}€`);
+        const ratio = pageData.livePrice / cachedPrice;
+        // Цена не может отличаться более чем в 10 раз от кэша — это явно артефакт
+        if (ratio > 10 || ratio < 0.1) {
+          console.log(`      [⚠️  Sanity] ${offer.shop_name}: live=${pageData.livePrice}€ слишком далека от кэша ${cachedPrice}€ → используем кэш`);
+        } else {
+          if (Math.abs(pageData.livePrice - cachedPrice) > 0.5) {
+            console.log(`      [💰 Live] ${offer.shop_name}: кэш=${cachedPrice}€ → реальная=${pageData.livePrice}€`);
+          }
+          offer.price = pageData.livePrice;
         }
-        offer.price = pageData.livePrice;
+      }
+
+      // --- Проверка dynamicFloor по РЕАЛЬНОЙ цене ---
+      if (dynamicFloor && offer.price < dynamicFloor) {
+        console.log(`      [Skip] ${offer.shop_name}: цена ${offer.price}€ ниже порога ${dynamicFloor.toFixed(2)}€`);
+        continue;
       }
 
       const pageTextLower = (offer.title + ' ' + pageData.bodyText).toLowerCase();
 
-      // === MPN BYPASS (Salidzini — магазины часто НЕ указывают партийник) ===
-      // Если MPN найден → мгновенное одобрение (bypass ключевых слов).
-      // Если MPN НЕ найден → проверяем по ключевым словам (fallback).
-      // На Amazon MPN = hard-check (там всегда указан). Здесь — нет.
+      // === MPN BYPASS ===
       if (mpn && pageTextLower.includes(mpn)) {
         console.log(`      [✅ MPN Match] ${offer.shop_name}: партийник "${component.part_number}" найден.`);
-        validOffers.push(offer);
-        if (validOffers.length >= 3) break;
+        candidateOffers.push(offer);
         continue;
       }
 
-      // === Стандартная проверка (только для компонентов без MPN — видеокарты) ===
+      // === Стандартная проверка (для компонентов без MPN — видеокарты) ===
       const hasPos = hasPositiveKeyword(pageData.bodyText, component.positive_keywords);
       const hasNeg = hasNegativeKeyword(offer.title + ' ' + pageData.coreText, component.negative_keywords);
       const isUsed = isUsedCondition(offer.title + ' ' + pageData.coreText);
 
       if (hasPos && !hasNeg && !isUsed) {
-        validOffers.push(offer);
-        if (validOffers.length >= 3) break;
+        candidateOffers.push(offer);
       } else {
         console.log(`      [Skip] ${offer.shop_name}: hasPos: ${hasPos}, hasNeg: ${hasNeg}, isUsed: ${isUsed}`);
       }
@@ -254,9 +247,12 @@ async function scrapeSalidzini(page, component, dynamicFloor) {
     }
   }
 
-  return validOffers;
+  // Сортируем по РЕАЛЬНОЙ цене и возвращаем топ-3
+  candidateOffers.sort((a, b) => a.price - b.price);
+  return candidateOffers.slice(0, 3);
 }
 
 module.exports = {
   scrapeSalidzini,
 };
+
